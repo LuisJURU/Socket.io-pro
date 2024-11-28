@@ -9,30 +9,55 @@ app.use(cors());
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: "http://localhost:5173",
+        origin: ["http://localhost:5173", "http://localhost:5174"], // Admin y Cliente
         methods: ["GET", "POST"],
     },
-    transports: ["websocket", "polling"],
-    allowUpgrades: true,
 });
+
+const connectedClients = {}; // Almacena los usuarios conectados con sus IDs
 
 io.on("connection", (socket) => {
+    const isAdmin = socket.handshake.query.isAdmin === "true";
+
+    if (isAdmin) {
+        console.log(`Administrador conectado: ${socket.id}`);
+        return; // No agrega al administrador a la lista de clientes
+    }
+
     console.log(`Cliente conectado: ${socket.id}`);
 
-    socket.on("message", (data) => {
-        console.log(`Mensaje recibido de ${data.username}: ${data.text}`);
-        io.emit("message", data); // Reenviar mensaje con username
+    // Escuchar el nombre del cliente
+    socket.on("set_name", (name) => {
+        connectedClients[socket.id] = name || "Usuario Anónimo";
+        io.emit("update_users", connectedClients); // Envía la lista actualizada con nombres
     });
 
-    socket.on("disconnect", (reason) => {
-        console.log(`Cliente desconectado: ${socket.id}, Razón: ${reason}`);
+    // Escuchar mensaje privado
+    socket.on("private_message", ({ message, to }) => {
+        if (connectedClients[to]) {
+            console.log(`Mensaje privado para ${to}: ${message}`);
+            io.to(to).emit("alert_message", { message, from: connectedClients[socket.id] });
+        } else {
+            console.log(`Usuario ${to} no encontrado.`);
+        }
+    });
+
+    // Escuchar mensaje a todos
+    socket.on("broadcast_message", (message) => {
+        console.log(`Mensaje para todos: ${message}`);
+        io.emit("alert_message", { message, from: connectedClients[socket.id] });
+    });
+
+    // Manejar desconexión
+    socket.on("disconnect", () => {
+        console.log(`Cliente desconectado: ${socket.id}`);
+        delete connectedClients[socket.id];
+        io.emit("update_users", connectedClients); // Envía la lista actualizada
     });
 });
 
-app.get("/", (req, res) => {
-    res.send("Socket.IO Server is Running");
-});
+
 
 server.listen(3001, () => {
-    console.log("Servidor de Socket.IO escuchando en http://localhost:3001");
+    console.log("Servidor escuchando en http://localhost:3001");
 });
